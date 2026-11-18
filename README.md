@@ -28,7 +28,7 @@ Copy the two generated applications to `~/Applications`. Open **PandaFan 断线�
 
 PandaFan must be started with the guard's dedicated group before protection can be enabled. Starting an already running client with a different identity requires a normal quit and restart. **Do not do this while the software controlling your Mac depends on PandaFan for its connection.** Arrange that step locally with a recovery path ready. The current preview does not automate the original PandaFan login item.
 
-Once the dedicated core and TUN are stable, choose **开启保护**. The five-minute trial shows **保持开启** so you can confirm protection after checking connectivity. If the trial expires, the watchdog restores networking. During normal protection, the menu shows **关闭保护** and **打开 PandaFan**.
+Once the dedicated core and TUN are stable, choose **开启保护**. The five-minute trial shows **保持开启** so you can confirm protection after checking connectivity. If the trial expires, the watchdog restores networking. During normal protection, the main actions are **关闭保护** and **打开 PandaFan**. Choose **功能介绍** at the bottom of the menu for a quick guide.
 
 ## Recovery
 

@@ -128,6 +128,10 @@ final class App: NSObject, NSApplicationDelegate {
             add("重新检查保护", #selector(enable))
             add("恢复联网（关闭保护）", #selector(restore))
         }
+        if state != .checking {
+            menu.addItem(.separator())
+        }
+        add("功能介绍…", #selector(showIntroduction))
         item.menu = menu
     }
 
@@ -171,6 +175,23 @@ final class App: NSObject, NSApplicationDelegate {
     @objc func enable() { perform("enable") }
     @objc func reconnect() { perform("reconnect") }
     @objc func commit() { perform("commit") }
+    @objc func showIntroduction() {
+        if #available(macOS 14.0, *) {
+            NSApp.activate()
+        } else {
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        notify("""
+        断线保护
+        PandaFan 断线时阻止应用直接访问公网，局域网仍可用。PandaFan 连通时保留原有智能分流。
+
+        日常使用
+        显示「已保护」时无需操作。开启保护后有五分钟试用，确认能联网后选「保持开启」。
+
+        恢复联网
+        公网锁定时，可以重新连接 PandaFan，或选「恢复联网（关闭保护）」。也可以直接打开「PandaFan 一键恢复」解除限制。
+        """)
+    }
     @objc func restore() {
         let response=request("restore")
         if response["ok"] as? Bool == true {
