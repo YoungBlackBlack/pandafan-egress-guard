@@ -283,12 +283,21 @@ class Controller:
         require(U.owned_path(gid) == path, '核心或隧道仍在变化；没有启用限制。')
         self.stable_path = path
         self.stable_since = time.monotonic() - 2
+        # A recheck must not replace committed protection with a timed trial,
+        # or extend an existing trial.
+        if not self.settings.get('enabled'):
+            self.start_trial()
         # Persist the enabled state before policy mutation for crash recovery.
         self.settings['enabled'] = True
         save_json('settings.json', self.settings)
         self.active_path = None
         self.last_rules = None
         self.manual_lock_until = 0
+        self.state.update(enabled=True,mode='locked',reason='等待受保护的 PandaFan 核心。')
+        self.tick(force=True)
+        return self.status()
+
+    def start_trial(self):
         # An independent process restores connectivity if verification cannot
         # finish. Commit removes this deadline only after on-device checks.
         deadline = U.session_clock() + 300
@@ -297,9 +306,15 @@ class Controller:
             subprocess.Popen(['/usr/bin/python3','-I','-B',str(BASE/'guard.py'),'watchdog'],
                              env=U.ENV,cwd='/',start_new_session=True,
                              stdin=null,stdout=null,stderr=null)
-        self.state.update(enabled=True,mode='locked',reason='等待受保护的 PandaFan 核心。')
-        self.tick(force=True)
-        return self.status()
+
+    def expire_trial(self):
+        # Called under the controller mutex, so confirmation and expiry cannot
+        # both act on the same trial.
+        trial = read_json('trial.json')
+        if self.settings.get('enabled') and trial_expired(trial, self.boot):
+            self.restore()
+            return True
+        return False
 
     def restore(self):
         # Set intent first: a KeepAlive restart must never re-enable protection.
@@ -382,6 +397,7 @@ class Controller:
         result = dict(self.state)
         result['service_running'] = True
         result['pf_enabled'] = U.pf_on()
+        result['trial_active'] = self.settings.get('enabled', False) and bool(read_json('trial.json'))
         if self.settings.get('enabled'):
             live = U.read_rules(ANCHOR)
             if not result['pf_enabled'] or 'label "pfg-deny"' not in live:
@@ -392,7 +408,8 @@ class Controller:
         while not self.stop_event.is_set():
             try:
                 with self.mutex:
-                    self.tick()
+                    if not self.expire_trial():
+                        self.tick()
             except Exception:
                 with self.mutex:
                     if self.settings.get('enabled'):
@@ -410,6 +427,9 @@ class Controller:
             if action == 'diagnostic': return self.diagnostic()
             if action == 'enable': return self.enable()
             if action == 'restore': return self.restore()
+            if action == 'expire-trial':
+                self.expire_trial()
+                return self.status()
             if action == 'reconnect': return self.start_panda()
             if action == 'prepare': return self.prepare()
             if action == 'commit':
@@ -435,8 +455,12 @@ def serve():
     require(os.geteuid() == 0, '服务必须由系统启动。')
     root_state_directory()
     controller = Controller()
-    # On service restart, withdraw stale public permissions before observing.
-    if controller.settings.get('enabled'):
+    trial = read_json('trial.json')
+    if controller.settings.get('enabled') and trial_expired(trial, controller.boot):
+        # An interrupted trial must not become permanent after a reboot.
+        controller.restore()
+    elif controller.settings.get('enabled'):
+        # On service restart, withdraw stale public permissions before observing.
         controller.install_rules(render(),force=True)
     elif controller.pf_record.get('owned'):
         # Finish an interrupted restore before accepting new UI requests.
@@ -476,9 +500,9 @@ def serve():
             except OSError:
                 pass
 
-def client(action):
+def client(action, timeout=35):
     conn = socket.socket(socket.AF_UNIX,socket.SOCK_STREAM)
-    conn.settimeout(35)
+    conn.settimeout(timeout)
     try:
         conn.connect(SOCK)
         conn.sendall(json.dumps({'action':action}).encode()+b'\n')
@@ -503,6 +527,9 @@ def emergency():
     require(not U.read_rules(ANCHOR).strip(), '紧急恢复尚未完成。')
     print('PandaFan 保护已解除。其他防火墙规则未改动。')
 
+def trial_expired(trial, boot):
+    return bool(trial and (trial['boot'] != boot or U.session_clock() >= trial['deadline']))
+
 def watchdog():
     # Separate from the daemon and its locks. This process survives a daemon
     # deadlock or crash, and never re-enables protection.
@@ -512,8 +539,19 @@ def watchdog():
         record = read_json('trial.json', {})
         if not record or record.get('boot') != boot:
             return
-        if U.session_clock() >= record['deadline']:
-            emergency()
+        if trial_expired(record, boot):
+            try:
+                if client('expire-trial', timeout=15).get('ok'):
+                    return
+            except (OSError, ValueError):
+                pass
+            if read_json('trial.json') == record:
+                emergency()
+                (DB/'trial.json').unlink(missing_ok=True)
+                # If the service could not respond, restart it with the
+                # persisted off state after the independent recovery.
+                plist = '/Library/LaunchDaemons/' + LABEL + '.plist'
+                run(['/bin/launchctl','bootstrap','system',plist])
             return
         time.sleep(2)
 

@@ -1,6 +1,7 @@
 import AppKit
 
 let service = "/Library/Application Support/PandaFanEgressGuard/guard.py"
+let launchDaemon = "/Library/LaunchDaemons/local.pandafan-egress-guard.plist"
 
 func request(_ action: String) -> [String: Any] {
     let p = Process()
@@ -63,15 +64,19 @@ final class App: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async {
                 self.busy=false
                 self.status=response["result"] as? [String:Any] ?? [:]
-                let mode=self.status["mode"] as? String ?? "missing"
-                let names=["connected":"盾 · 已保护","locked":"盾 · 公网锁定","off":"盾 · 已恢复","error":"盾 · 异常","missing":"盾 · 待安装"]
+                let installed = FileManager.default.fileExists(atPath: launchDaemon)
+                let unavailable = installed ? "系统服务未响应，可从菜单修复。" : "系统服务尚未安装。"
+                let mode=self.status["mode"] as? String ?? (installed ? "unavailable" : "missing")
+                let names=["connected":"盾 · 已保护","locked":"盾 · 公网锁定","off":"盾 · 已恢复","error":"盾 · 异常","missing":"盾 · 待安装","unavailable":"盾 · 服务异常"]
                 self.item.button?.title=names[mode] ?? "盾 · 检查中"
-                self.statusLine.title=self.status["reason"] as? String ?? "系统服务尚未安装。"
+                self.statusLine.title = mode == "connected" && self.status["trial_active"] as? Bool == true
+                    ? "试用中，请确认持续保护。"
+                    : self.status["reason"] as? String ?? unavailable
             }
         }
     }
 
-    func perform(_ action:String, success:String?=nil) {
+    func perform(_ action:String) {
         guard !busy else { notify("正在检查状态，请稍后再试。");return }
         busy=true
         DispatchQueue.global().async {
@@ -79,7 +84,11 @@ final class App: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async {
                 self.busy=false
                 if response["ok"] as? Bool != true { notify(response["message"] as? String ?? "服务未响应，请安装或修复系统服务。") }
-                else if let text=success { notify(text) }
+                else if action == "enable",
+                        let result = response["result"] as? [String:Any],
+                        result["trial_active"] as? Bool == true {
+                    notify("保护正在试用。确认联网正常后，可从菜单确认持续保护。")
+                }
                 self.refresh()
             }
         }
@@ -91,7 +100,7 @@ final class App: NSObject, NSApplicationDelegate {
         if !admin(command) { notify("安装未完成。管理员密码只在 macOS 授权窗口中输入。");return }
         refresh()
     }
-    @objc func enable() { perform("enable",success:"保护已启用，当前为五分钟安全验收。确认联网正常后，可从菜单确认持续保护。") }
+    @objc func enable() { perform("enable") }
     @objc func reconnect() { perform("reconnect") }
     @objc func commit() { perform("commit") }
     @objc func restore() {

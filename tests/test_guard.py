@@ -2,7 +2,7 @@ import importlib.util
 from pathlib import Path
 import sys
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 SOURCE = Path(__file__).resolve().parents[1] / 'src'
 spec = importlib.util.spec_from_file_location('guard', SOURCE/'guard.py')
@@ -110,5 +110,50 @@ class ReconcileTests(unittest.TestCase):
             with self.assertRaises(G.U.GuardError):c.enable()
         self.assertFalse(c.settings['enabled'])
         self.assertFalse(hasattr(c,'generated'))
+
+    def test_enable_again_preserves_existing_trial_or_commit(self):
+        path = (1, 'utun4', (('inet', '198.18.0.1'),))
+        for already_enabled in (False, True):
+            with self.subTest(already_enabled=already_enabled):
+                c = self.controller()
+                c.settings['enabled'] = already_enabled
+                c.check_layout = Mock()
+                c.start_trial = Mock()
+                c.tick = Mock()
+                c.status = Mock(return_value={'mode': 'connected'})
+                with patch.object(G.U, 'read_rules', return_value=''), \
+                     patch.object(G.U, 'group_id', return_value=412), \
+                     patch.object(G.U, 'owned_path', return_value=path), \
+                     patch.object(G.time, 'sleep'), patch.object(G, 'save_json'):
+                    self.assertEqual(c.enable()['mode'], 'connected')
+                self.assertEqual(c.start_trial.call_count, int(not already_enabled))
+                c.tick.assert_called_once_with(force=True)
+
+    def test_expiry_is_ignored_after_confirmation_and_restores_when_due(self):
+        c = self.controller()
+        c.restore = Mock()
+        for trial, expected in (
+            (None, False),
+            ({'boot': 'test', 'deadline': 101}, False),
+            ({'boot': 'test', 'deadline': 100}, True),
+            ({'boot': 'previous', 'deadline': 101}, True),
+        ):
+            with self.subTest(trial=trial), patch.object(G, 'read_json', return_value=trial), \
+                 patch.object(G.U, 'session_clock', return_value=100):
+                c.restore.reset_mock()
+                self.assertEqual(c.expire_trial(), expected)
+                self.assertEqual(c.restore.call_count, int(expected))
+
+    def test_watchdog_leaves_responding_service_running(self):
+        trial = {'boot': 'test', 'deadline': 100}
+        with patch.object(G.os, 'geteuid', return_value=0), \
+             patch.object(G.U, 'boot_id', return_value='test'), \
+             patch.object(G.U, 'session_clock', return_value=100), \
+             patch.object(G, 'read_json', return_value=trial), \
+             patch.object(G, 'client', return_value={'ok': True}) as client, \
+             patch.object(G, 'emergency') as emergency:
+            G.watchdog()
+        client.assert_called_once_with('expire-trial', timeout=15)
+        emergency.assert_not_called()
 
 if __name__=='__main__': unittest.main()
