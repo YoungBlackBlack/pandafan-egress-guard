@@ -1,0 +1,11 @@
+*.app/
+__pycache__/
+*.pyc
+*结果.json
+owner.json
+*.log
+*.pem
+*.key
+.DS_Store
+dist/
+验收报告.md

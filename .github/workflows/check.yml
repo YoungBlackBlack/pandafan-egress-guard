@@ -1,0 +1,15 @@
+name: Source checks
+on: [push, pull_request]
+jobs:
+  check:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Policy and reconciliation tests
+        run: python3 -m unittest discover -s tests -v
+      - name: Python and shell syntax
+        run: |
+          python3 -c 'import ast,pathlib; [ast.parse(p.read_text()) for p in pathlib.Path(".").rglob("*.py")]'
+          sh -n src/install.sh
+      - name: Compile native application
+        run: swiftc -framework AppKit src/GuardApp.swift -o "$RUNNER_TEMP/PandaFanGuard"
