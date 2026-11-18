@@ -24,15 +24,15 @@ python3 build.py
 
 By default builds are signed ad hoc. Set `GUARD_SIGN_IDENTITY` to use a local signing identity.
 
-Copy the two generated applications to `~/Applications`. Open **PandaFan 断线保护.app**, then choose **安装 / 修复系统服务**. Enter the administrator password only into macOS's own authorization dialog. The installer detects the logged-in account; the repository contains no user-specific path or PandaFan configuration.
+Copy the two generated applications to `~/Applications`. Open **PandaFan 断线保护.app**, then choose **安装保护服务**. If the service stops responding, the menu offers **修复保护服务**. Enter the administrator password only into macOS's own authorization dialog. The installer detects the logged-in account.
 
 PandaFan must be started with the guard's dedicated group before protection can be enabled. Starting an already running client with a different identity requires a normal quit and restart. **Do not do this while the software controlling your Mac depends on PandaFan for its connection.** Arrange that step locally with a recovery path ready. The current preview does not automate the original PandaFan login item.
 
-Once the dedicated core and TUN are stable, **开启 / 重新检查保护** loads the connected policy directly. Initial activation creates a five-minute independent recovery deadline; confirm normal operation using **确认持续保护** to retain it. Without confirmation, the independent watchdog restores networking.
+Once the dedicated core and TUN are stable, choose **开启保护**. The five-minute trial shows **保持开启** so you can confirm protection after checking connectivity. If the trial expires, the watchdog restores networking. During normal protection, the menu shows **关闭保护** and **打开 PandaFan**.
 
 ## Recovery
 
-Open **PandaFan 一键恢复.app** or choose **一键恢复正常联网** from the guard menu. This does not close PandaFan.
+Open **PandaFan 一键恢复.app** or use **关闭保护** in the guard menu. When public networking is locked, that action is labeled **恢复联网（关闭保护）**.
 
 If the local service is unavailable, the recovery application asks for macOS administrator authorization and uses the separate emergency path. The same offline command is:
 

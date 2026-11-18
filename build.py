@@ -19,7 +19,7 @@ for title,recovery in [('PandaFan 断线保护',False),('PandaFan 一键恢复',
     metadata={'CFBundleName':title,'CFBundleDisplayName':title,
               'CFBundleIdentifier':'local.pandafan.egressguard'+('.restore' if recovery else '.app'),
               'CFBundleExecutable':'PandaFanGuard','CFBundlePackageType':'APPL',
-              'CFBundleShortVersionString':'0.1.1','CFBundleVersion':'2',
+              'CFBundleShortVersionString':'0.1.2','CFBundleVersion':'3',
               'LSMinimumSystemVersion':'13.0','LSUIElement':True,'GuardRecoveryOnly':recovery,
               'NSHighResolutionCapable':True}
     (contents/'Info.plist').write_bytes(plistlib.dumps(metadata))

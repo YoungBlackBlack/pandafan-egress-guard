@@ -30,31 +30,105 @@ func notify(_ text: String) {
     a.addButton(withTitle: "好"); a.runModal()
 }
 
+enum ProtectionMenuState: String {
+    case checking, protected, trial, locked, off, missing, unavailable, error
+
+    init(status: [String: Any], installed: Bool) {
+        switch status["mode"] as? String {
+        case "connected": self = status["trial_active"] as? Bool == true ? .trial : .protected
+        case "locked": self = .locked
+        case "off": self = .off
+        case "error": self = .error
+        default: self = installed ? .unavailable : .missing
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .checking: return "盾 · 检查中"
+        case .protected: return "盾 · 已保护"
+        case .trial: return "盾 · 试用中"
+        case .locked: return "盾 · 公网锁定"
+        case .off: return "盾 · 已关闭"
+        case .missing: return "盾 · 待安装"
+        case .unavailable, .error: return "盾 · 服务异常"
+        }
+    }
+
+    var description: String {
+        switch self {
+        case .checking: return "正在读取保护状态…"
+        case .protected: return "PandaFan 断线时会阻止公网直连。"
+        case .trial: return "联网正常后，选择「保持开启」。"
+        case .locked: return "PandaFan 连接异常，公网已锁定。"
+        case .off: return "断线保护已关闭。"
+        case .missing: return "首次使用需要安装保护服务。"
+        case .unavailable: return "保护服务未响应。"
+        case .error: return "保护状态异常。"
+        }
+    }
+}
+
 final class App: NSObject, NSApplicationDelegate {
     var item: NSStatusItem!
-    var statusLine: NSMenuItem!
+    var menuState: ProtectionMenuState?
     var timer: Timer?
     var busy = false
-    var status = [String:Any]()
     var recoveryOnly: Bool { Bundle.main.object(forInfoDictionaryKey: "GuardRecoveryOnly") as? Bool ?? false }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         if recoveryOnly { restore(); NSApp.terminate(nil); return }
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        item.button?.title = "盾 · 检查中"
-        let menu = NSMenu()
-        statusLine = NSMenuItem(title: "读取保护状态…", action: nil, keyEquivalent: "")
-        menu.addItem(statusLine); menu.addItem(.separator())
-        for (title, action) in [("开启 / 重新检查保护", #selector(enable)), ("确认持续保护", #selector(commit)), ("重新连接 PandaFan", #selector(reconnect)), ("一键恢复正常联网", #selector(restore)), ("安装 / 修复系统服务…", #selector(install)), ("打开 PandaFan", #selector(openPanda))] {
-            let m = NSMenuItem(title: title, action: action, keyEquivalent: ""); m.target=self; menu.addItem(m)
-        }
-        menu.addItem(.separator())
-        let info=NSMenuItem(title:"退出菜单栏（保护继续运行）",action:#selector(quit),keyEquivalent:"");info.target=self;menu.addItem(info)
-        item.menu=menu
+        updateMenu(.checking)
         refresh()
         timer=Timer.scheduledTimer(withTimeInterval:4,repeats:true) { [weak self] _ in self?.refresh() }
         if CommandLine.arguments.contains("--install") { install() }
+    }
+
+    func updateMenu(_ state: ProtectionMenuState) {
+        guard state != menuState else { return }
+        menuState = state
+        item.button?.title = state.title
+
+        let menu = NSMenu()
+        menu.addItem(NSMenuItem(title: state.description, action: nil, keyEquivalent: ""))
+
+        func add(_ title: String, _ action: Selector) {
+            let entry = NSMenuItem(title: title, action: action, keyEquivalent: "")
+            entry.target = self
+            menu.addItem(entry)
+        }
+
+        if state != .checking {
+            menu.addItem(.separator())
+        }
+        switch state {
+        case .checking:
+            break
+        case .protected:
+            add("关闭保护", #selector(restore))
+            add("打开 PandaFan", #selector(openPanda))
+        case .trial:
+            add("保持开启", #selector(commit))
+            add("关闭保护", #selector(restore))
+        case .locked:
+            add("重新连接 PandaFan", #selector(reconnect))
+            add("恢复联网（关闭保护）", #selector(restore))
+            add("打开 PandaFan", #selector(openPanda))
+        case .off:
+            add("开启保护", #selector(enable))
+            add("打开 PandaFan", #selector(openPanda))
+        case .missing:
+            add("安装保护服务…", #selector(install))
+        case .unavailable:
+            add("修复保护服务…", #selector(install))
+            add("恢复联网（关闭保护）", #selector(restore))
+        case .error:
+            add("重新检查保护", #selector(enable))
+            add("恢复联网（关闭保护）", #selector(restore))
+        }
+        item.menu = menu
     }
 
     func refresh() {
@@ -63,15 +137,9 @@ final class App: NSObject, NSApplicationDelegate {
             let response=request("status")
             DispatchQueue.main.async {
                 self.busy=false
-                self.status=response["result"] as? [String:Any] ?? [:]
+                let status = response["result"] as? [String:Any] ?? [:]
                 let installed = FileManager.default.fileExists(atPath: launchDaemon)
-                let unavailable = installed ? "系统服务未响应，可从菜单修复。" : "系统服务尚未安装。"
-                let mode=self.status["mode"] as? String ?? (installed ? "unavailable" : "missing")
-                let names=["connected":"盾 · 已保护","locked":"盾 · 公网锁定","off":"盾 · 已恢复","error":"盾 · 异常","missing":"盾 · 待安装","unavailable":"盾 · 服务异常"]
-                self.item.button?.title=names[mode] ?? "盾 · 检查中"
-                self.statusLine.title = mode == "connected" && self.status["trial_active"] as? Bool == true
-                    ? "试用中，请确认持续保护。"
-                    : self.status["reason"] as? String ?? unavailable
+                self.updateMenu(ProtectionMenuState(status: status, installed: installed))
             }
         }
     }
@@ -87,7 +155,7 @@ final class App: NSObject, NSApplicationDelegate {
                 else if action == "enable",
                         let result = response["result"] as? [String:Any],
                         result["trial_active"] as? Bool == true {
-                    notify("保护正在试用。确认联网正常后，可从菜单确认持续保护。")
+                    notify("保护已试用开启。联网正常后，请在五分钟内从菜单选择「保持开启」。")
                 }
                 self.refresh()
             }
@@ -113,7 +181,6 @@ final class App: NSObject, NSApplicationDelegate {
         }
     }
     @objc func openPanda() { NSWorkspace.shared.openApplication(at: URL(fileURLWithPath:"/Applications/PandaFan.app"),configuration:NSWorkspace.OpenConfiguration(),completionHandler:nil) }
-    @objc func quit() { NSApp.terminate(nil) }
 }
 
 let app=NSApplication.shared
