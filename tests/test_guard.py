@@ -111,6 +111,47 @@ class ReconcileTests(unittest.TestCase):
         self.assertFalse(c.settings['enabled'])
         self.assertFalse(hasattr(c,'generated'))
 
+    def test_setup_waits_for_quit_then_shows_readiness_without_enabling(self):
+        c = self.controller()
+        c.settings['enabled'] = False
+        c.start_panda = Mock()
+        with patch.object(G.os, 'stat', return_value=Mock(st_uid=G.OWNER)), \
+             patch.object(G.os, 'access', return_value=True), \
+             patch.object(G.U, 'pf_on', return_value=False), \
+             patch.object(G.U, 'group_id', return_value=412), \
+             patch.object(G.U, 'owned_path', side_effect=[
+                 G.U.GuardError('not ready'), G.U.GuardError('not ready'),
+                 (1, 'utun4', (('inet', '198.18.0.1'),)),
+             ]), patch.object(G.U, 'processes', side_effect=[[Mock(path=G.GUI)], []]):
+            self.assertEqual(c.prepare()['setup_state'], 'waiting')
+            c.start_panda.assert_not_called()
+            c.advance_setup()
+            self.assertEqual(c.status()['setup_state'], 'connect')
+            c.start_panda.assert_called_once_with(require_enabled=False)
+            c.advance_setup()
+            self.assertEqual(c.status()['setup_state'], 'ready')
+        self.assertFalse(c.settings['enabled'])
+        self.assertFalse(hasattr(c, 'generated'))
+
+    def test_expired_setup_does_not_restart_pandafan(self):
+        c = self.controller()
+        c.settings['enabled'] = False
+        c.setup_state = 'waiting'
+        c.start_panda = Mock()
+        with patch.object(G.U, 'group_id', return_value=412), \
+             patch.object(G.U, 'owned_path', side_effect=G.U.GuardError('not ready')), \
+             patch.object(G.time, 'monotonic', return_value=100):
+            c.advance_setup()
+        self.assertEqual(c.setup_state, 'retry')
+        c.start_panda.assert_not_called()
+
+    def test_setup_cannot_restart_an_enabled_guard(self):
+        c = self.controller()
+        with patch.object(G.U, 'group_id') as group:
+            with self.assertRaises(G.GuardError):
+                c.prepare()
+        group.assert_not_called()
+
     def test_enable_again_preserves_existing_trial_or_commit(self):
         path = (1, 'utun4', (('inet', '198.18.0.1'),))
         for already_enabled in (False, True):

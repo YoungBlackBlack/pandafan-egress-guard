@@ -1,36 +1,32 @@
 # PandaFan Egress Guard
 
+PandaFan Egress Guard is a macOS kill switch that blocks apps from falling back to direct internet access when PandaFan's local tunnel goes down or its core stops.
+
 English · [简体中文](README.zh-CN.md)
 
-Experimental macOS egress protection for PandaFan, preserving smart routing and scoped Tailscale traffic. Independent project; not affiliated with PandaFan or Tailscale.
+PandaFan's smart routing continues while PandaFan is connected. Local network traffic and scoped Tailscale traffic remain available under protection. You can restore normal internet access in one click.
 
-**Development preview.** This is privileged firewall software, tested on one Apple silicon Mac with PandaFan 3.3.3. Review the source and recovery path before enabling it. It is not a guarantee against every form of leakage, and boot-time protection has not been verified.
+This is an independent project with no affiliation to PandaFan or Tailscale.
 
-## Design
+**Development preview.** The protection policy was previously tested on Apple silicon with PandaFan 3.3.3. This app uses administrator authorization to install its firewall service. Boot-time protection is still unverified.
 
-- A root LaunchDaemon manages one dedicated pf anchor, `com.apple/000.pandafan-egress-guard`.
-- A dedicated empty group identifies the PandaFan instance started by the guard. Only root sockets carrying that group and the positively identified PandaFan TUN receive ordinary public egress exceptions.
-- The guard preserves PandaFan's smart-routing decisions, including DIRECT. It does not force all websites to use a proxy exit IP.
-- Core, identity, or tunnel changes withdraw the ordinary public exceptions. LAN and loopback remain available, including DNS sent to LAN resolvers.
-- Authenticated Tailscale processes receive exceptions limited to their observed sockets; the identified Tailscale TUN receives tailnet-only exceptions. Arbitrary utun interfaces and root programs are not whitelisted. Tailscale exit nodes are not a public egress exception.
-- Restore clears this anchor and releases this tool's own pf reference. It does not globally disable pf, flush other anchors or states, or modify `/etc/pf.conf`.
+## Install from source
 
-## Build and installation
+You need macOS 13 or later, the Xcode Command Line Tools, and PandaFan installed in **Applications**. Sign in to PandaFan and confirm it connects in enhanced mode. Run `xcode-select --install` if you need the command line tools.
 
-Requires macOS 13+, Xcode Command Line Tools, and PandaFan at `/Applications/PandaFan.app` using enhanced mode. Python uses macOS's `/usr/bin/python3`; application bundles are built for the current architecture.
+1. **Build the apps.** Download and unzip the source. Open Terminal in the extracted folder and run the command below. [Download source ZIP](https://github.com/YoungBlackBlack/pandafan-egress-guard/archive/refs/heads/main.zip)
 
-```sh
-python3 -m unittest discover -s tests -v
-python3 build.py
-```
+   ```sh
+   /usr/bin/python3 build.py
+   ```
 
-By default builds are signed ad hoc. Set `GUARD_SIGN_IDENTITY` to use a local signing identity.
+2. **Install the service.** Move both apps to your personal Applications folder (`~/Applications`). Open **PandaFan 断线保护**, click the shield in the menu bar and choose **安装保护服务…** (Install protection service). Approve the macOS prompt.
+3. **Complete first-time setup.** At the Mac, choose **首次设置…** (First-time setup). If PandaFan is running, quit it from its own menu within 90 seconds as prompted. The guard reopens PandaFan. Connect in enhanced mode and wait for **开启保护** (Enable protection) to appear.
+4. **Enable protection.** Choose **开启保护**, check that you can reach the internet, then choose **保持开启** (Keep protection on) within the five-minute trial. If the trial expires, the guard removes its restrictions.
 
-Copy the two generated applications to `~/Applications`. Open **PandaFan 断线保护.app**, then choose **安装保护服务**. If the service stops responding, the menu offers **修复保护服务**. Enter the administrator password only into macOS's own authorization dialog. The installer detects the logged-in account.
+When the shield shows **已保护** (Protected), setup is complete. Choose **功能介绍…** for a quick guide or **修复保护服务…** if the service stops responding.
 
-PandaFan must be started with the guard's dedicated group before protection can be enabled. Starting an already running client with a different identity requires a normal quit and restart. **Do not do this while the software controlling your Mac depends on PandaFan for its connection.** Arrange that step locally with a recovery path ready. The current preview does not automate the original PandaFan login item.
-
-Once the dedicated core and TUN are stable, choose **开启保护**. The five-minute trial shows **保持开启** so you can confirm protection after checking connectivity. If the trial expires, the watchdog restores networking. During normal protection, the main actions are **关闭保护** and **打开 PandaFan**. Choose **功能介绍** at the bottom of the menu for a quick guide.
+If an older service is installed, turn off protection and choose **更新保护服务…** (Update protection service) to get the first-time setup menu.
 
 ## Recovery
 
@@ -44,15 +40,24 @@ sudo /usr/bin/python3 -I -B '/Library/Application Support/PandaFanEgressGuard/gu
 
 The root service and its policy persist independently of the menu application. At boot the service reloads an enabled policy, but there is no guarantee covering the first packet during system startup. A PandaFan instance launched by its ordinary login item may lack the dedicated group; in that case protection remains locked until locally restarted through the guard.
 
+## Design
+
+- A root LaunchDaemon manages one dedicated pf anchor, `com.apple/000.pandafan-egress-guard`.
+- A dedicated empty group identifies the PandaFan instance started by the guard. Only root sockets carrying that group and the positively identified PandaFan TUN receive ordinary public egress exceptions.
+- The guard preserves PandaFan's smart-routing decisions, including DIRECT. It does not force all websites to use a proxy exit IP.
+- Core, identity, or tunnel changes withdraw the ordinary public exceptions. LAN and loopback remain available, including DNS sent to LAN resolvers.
+- Authenticated Tailscale processes receive exceptions limited to their observed sockets; the identified Tailscale TUN receives tailnet-only exceptions. Arbitrary utun interfaces and root programs are not whitelisted. Tailscale exit nodes are not a public egress exception.
+- Restore clears this anchor and releases this tool's own pf reference. It does not globally disable pf, flush other anchors or states, or modify `/etc/pf.conf`.
+
 ## Validation
 
-`tests/test_guard.py` checks rules and state changes without altering networking.
+`/usr/bin/python3 -m unittest discover -s tests -v` checks rules and state changes without altering networking.
 
 `verify_safe.py` keeps PandaFan running and tests actual public APIs, physical-interface blocking, Tailscale peer communication, and the recovery application. It requires an already managed PandaFan core and an online tailnet peer. It temporarily starts a stopped Tailscale and restores that state afterward. It enables the guard and commits it only if its acceptance checks pass.
 
 `verify_runtime.py --allow-disruptive-tests` is a **disruptive local-only test**. It intentionally locks public networking. Never run it through a connection that depends on PandaFan; never run it unattended. The safe check is the default choice.
 
-No credentials, subscriptions, traffic records, or device-specific verification output belong in the repository. Generated applications and local acceptance results are ignored.
+The build targets the current Mac's architecture and uses ad hoc signing by default. Set `GUARD_SIGN_IDENTITY` to use a local signing identity. Generated apps and local acceptance results are ignored by Git.
 
 ## Attribution
 

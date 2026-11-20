@@ -217,6 +217,9 @@ class Controller:
         self.stable_path = None
         self.stable_since = 0
         self.manual_lock_until = 0
+        self.setup_state = None
+        self.setup_deadline = 0
+        self.setup_message = None
         self.boot = U.boot_id()
         self.pf_record = read_json('pf.json', {})
         if self.pf_record.get('boot') != self.boot:
@@ -352,17 +355,39 @@ class Controller:
         return {'ok':True,'message':'PandaFan 已用专用身份启动，正在等待隧道。'}
 
     def prepare(self):
+        require(not self.settings.get('enabled'), '断线保护已开启，无需首次设置。')
+        require(os.stat('/dev/console').st_uid == OWNER, '请在当前用户登录桌面后进行首次设置。')
+        require(os.access(GUI, os.X_OK), '请先把 PandaFan 安装到「应用程序」文件夹。')
         U.group_id(create=True)
-        def after_quit():
-            deadline = time.monotonic()+90
-            while time.monotonic()<deadline:
-                if not any(p.path in (GUI,CORE) for p in U.processes()):
-                    with self.mutex:
-                        self.start_panda(require_enabled=False)
-                    return
-                time.sleep(0.4)
-        threading.Thread(target=after_quit,daemon=True).start()
-        return {'message':'等待 PandaFan 从自身菜单退出，随后自动以专用身份重新启动；尚未启用防火墙限制。'}
+        if self.setup_state != 'waiting':
+            self.setup_state = 'waiting'
+            self.setup_message = None
+            self.setup_deadline = time.monotonic() + 90
+        self.advance_setup()
+        return self.status()
+
+    def advance_setup(self):
+        if self.settings.get('enabled') or self.setup_state not in ('waiting', 'connect', 'ready'):
+            return
+        try:
+            try:
+                U.owned_path(U.group_id())
+            except U.GuardError:
+                pass
+            else:
+                self.setup_state = 'ready'
+                return
+            if self.setup_state != 'waiting':
+                self.setup_state = 'connect'
+            elif time.monotonic() >= self.setup_deadline:
+                self.setup_state = 'retry'
+                self.setup_message = '未在 90 秒内退出 PandaFan，可以重新开始首次设置。'
+            elif not any(p.path in (GUI,CORE) for p in U.processes()):
+                self.start_panda(require_enabled=False)
+                self.setup_state = 'connect'
+        except (U.GuardError, GuardError, OSError, subprocess.SubprocessError):
+            self.setup_state = 'retry'
+            self.setup_message = 'PandaFan 未能重新启动，请重试首次设置。'
 
     def tick(self, force=False):
         if not self.settings.get('enabled'):
@@ -402,6 +427,10 @@ class Controller:
             live = U.read_rules(ANCHOR)
             if not result['pf_enabled'] or 'label "pfg-deny"' not in live:
                 result.update(mode='error',reason='保护异常：需要重新检查。')
+        else:
+            result['setup_state'] = self.setup_state or 'initial'
+            result['setup_message'] = self.setup_message
+            result['panda_installed'] = os.access(GUI, os.X_OK)
         return result
 
     def loop(self):
@@ -409,6 +438,7 @@ class Controller:
             try:
                 with self.mutex:
                     if not self.expire_trial():
+                        self.advance_setup()
                         self.tick()
             except Exception:
                 with self.mutex:
@@ -425,7 +455,10 @@ class Controller:
         with self.mutex:
             if action == 'status': return self.status()
             if action == 'diagnostic': return self.diagnostic()
-            if action == 'enable': return self.enable()
+            if action == 'enable':
+                result = self.enable()
+                self.setup_state = 'ready'
+                return result
             if action == 'restore': return self.restore()
             if action == 'expire-trial':
                 self.expire_trial()
