@@ -1,5 +1,7 @@
 # PandaFan Egress Guard
 
+English · [简体中文](README.zh-CN.md)
+
 Experimental macOS egress protection for PandaFan, preserving smart routing and scoped Tailscale traffic. Independent project; not affiliated with PandaFan or Tailscale.
 
 **Development preview.** This is privileged firewall software, tested on one Apple silicon Mac with PandaFan 3.3.3. Review the source and recovery path before enabling it. It is not a guarantee against every form of leakage, and boot-time protection has not been verified.
